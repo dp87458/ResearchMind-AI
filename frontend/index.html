@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ResearchMind AI</title>
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<style>
+  :root{--bg:#0b1020;--card:#141b34;--line:#26305a;--text:#e6e9f5;--mut:#8b94b8;--acc:#6c8cff;--ok:#34d399;--bad:#f87171}
+  *{box-sizing:border-box} body{margin:0;font-family:Inter,system-ui,sans-serif;background:var(--bg);color:var(--text)}
+  header{padding:22px 32px;border-bottom:1px solid var(--line)}
+  header h1{margin:0;font-size:22px} header p{margin:4px 0 0;color:var(--mut);font-size:13px}
+  main{display:grid;grid-template-columns:380px 1fr;gap:20px;padding:20px 32px;max-width:1400px;margin:auto}
+  @media(max-width:900px){main{grid-template-columns:1fr}}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px;margin-bottom:16px}
+  .card h3{margin:0 0 12px;font-size:12px;letter-spacing:.1em;color:var(--acc);text-transform:uppercase}
+  input[type=text]{width:100%;padding:11px;border-radius:8px;border:1px solid var(--line);background:#0e1429;color:var(--text);font-size:14px}
+  input[type=file]{color:var(--mut);font-size:13px;width:100%}
+  button{width:100%;margin-top:10px;padding:11px;border:0;border-radius:8px;background:var(--acc);color:#fff;font-weight:600;cursor:pointer;font-size:14px}
+  button:disabled{opacity:.5;cursor:not-allowed}
+  .small{font-size:12px;color:var(--mut);margin-top:8px}
+  .step{padding:8px 10px;border-left:3px solid var(--acc);background:#0e1429;border-radius:6px;margin-bottom:8px;font-size:13px;animation:f .3s}
+  .step b{text-transform:capitalize} .step span{color:var(--mut);display:block;margin-top:2px;word-break:break-word}
+  @keyframes f{from{opacity:0;transform:translateY(4px)}to{opacity:1}}
+  .badge{display:inline-block;padding:4px 12px;border-radius:99px;font-size:12px;font-weight:700;margin-right:8px}
+  .report{line-height:1.65;font-size:14.5px} .report h1,.report h2{border-bottom:1px solid var(--line);padding-bottom:6px}
+  .report table{border-collapse:collapse;width:100%;font-size:13px} .report th,.report td{border:1px solid var(--line);padding:6px 8px}
+  .report a{color:var(--acc)}
+  .src a{display:block;color:var(--acc);font-size:12px;margin:4px 0;text-decoration:none;word-break:break-all}
+</style>
+</head>
+<body>
+<header><h1>🧠 ResearchMind AI</h1>
+<p>Hierarchical Multi-Agent RAG Platform · LangGraph · ChromaDB · Tavily</p></header>
+<main>
+  <div>
+    <div class="card"><h3>1 · Upload papers (PDF)</h3>
+      <input type="file" id="files" accept=".pdf" multiple>
+      <button id="upBtn">Embed into ChromaDB</button>
+      <div class="small" id="upStatus">Optional — skip for web-only research.</div></div>
+    <div class="card"><h3>2 · Research topic</h3>
+      <input type="text" id="topic" placeholder="e.g. Deep learning for power system fault detection">
+      <button id="runBtn">Run multi-agent research</button></div>
+    <div class="card"><h3>Agent trace (live)</h3><div id="trace"><div class="small">Waiting…</div></div></div>
+  </div>
+  <div>
+    <div class="card"><h3>Final report</h3><div id="meta"></div>
+      <div class="report" id="report"><div class="small">The generated report appears here.</div></div></div>
+    <div class="card src"><h3>Web sources</h3><div id="sources" class="small">—</div></div>
+  </div>
+</main>
+<script>
+let sessionId="";
+const $=id=>document.getElementById(id);
+$("upBtn").onclick=async()=>{
+  const fs=$("files").files; if(!fs.length){alert("Choose PDF(s) first");return}
+  const fd=new FormData(); for(const f of fs) fd.append("files",f);
+  $("upBtn").disabled=true; $("upStatus").textContent="Chunking & embedding…";
+  try{
+    const r=await fetch("/api/upload",{method:"POST",body:fd}); const j=await r.json();
+    if(!r.ok) throw new Error(j.detail||"upload failed");
+    sessionId=j.session_id; $("upStatus").textContent=`✅ ${j.files} PDF(s) → ${j.chunks} chunks in ChromaDB`;
+  }catch(e){$("upStatus").textContent="❌ "+e.message}
+  $("upBtn").disabled=false;
+};
+function addStep(s){
+  let d=s.detail; if(d&&typeof d==="object"&&!Array.isArray(d)) d=`score ${d.score}/10 — ${d.feedback||""}`;
+  if(Array.isArray(d)) d=d.join(" | ");
+  const el=document.createElement("div"); el.className="step";
+  el.innerHTML=`<b>${s.node}</b><span>${d||""}</span>`; $("trace").appendChild(el);
+}
+$("runBtn").onclick=async()=>{
+  const topic=$("topic").value.trim(); if(!topic){alert("Enter a topic");return}
+  $("runBtn").disabled=true; $("trace").innerHTML=""; $("report").innerHTML='<div class="small">Agents working…</div>';
+  $("meta").innerHTML=""; $("sources").textContent="—";
+  try{
+    const res=await fetch("/api/research",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({session_id:sessionId,topic,max_revisions:2})});
+    const reader=res.body.getReader(), dec=new TextDecoder(); let buf="";
+    while(true){
+      const {done,value}=await reader.read(); if(done)break;
+      buf+=dec.decode(value,{stream:true}); const parts=buf.split("\n\n"); buf=parts.pop();
+      for(const p of parts){
+        if(!p.startsWith("data:"))continue; const m=JSON.parse(p.slice(5));
+        if(m.type==="step")addStep(m);
+        else if(m.type==="error"){$("report").innerHTML='<div style="color:var(--bad)">Error: '+m.message+'</div>'}
+        else if(m.type==="done"){
+          $("report").innerHTML=marked.parse(m.report);
+          const c=m.score>=8?"var(--ok)":"var(--bad)";
+          $("meta").innerHTML=`<span class="badge" style="background:${c}">Critic score ${m.score}/10</span><span class="badge" style="background:#26305a">${m.revisions} draft(s)</span>`;
+          $("sources").innerHTML=m.sources.length?m.sources.map(s=>`<a href="${s.url}" target="_blank">${s.title||s.url}</a>`).join(""):"No web sources (Tavily key missing?)";
+        }
+      }
+    }
+  }catch(e){$("report").innerHTML='<div style="color:var(--bad)">'+e.message+'</div>'}
+  $("runBtn").disabled=false;
+};
+</script>
+</body>
+</html>

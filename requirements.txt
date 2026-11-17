@@ -1,0 +1,16 @@
+fastapi
+uvicorn[standard]
+python-multipart
+python-dotenv
+langgraph
+langchain
+langchain-groq
+fastembed
+langchain-community
+langchain-chroma
+langchain-text-splitters
+chromadb
+pypdf
+tavily-python
+beautifulsoup4
+requests
